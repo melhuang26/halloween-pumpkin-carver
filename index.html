@@ -1,0 +1,706 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MediaPipe Halloween Pumpkin Carver 🎃</title>
+    <!-- MediaPipe dependencies -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+    <!-- Tone.js for Web Audio sound effects -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js" crossorigin="anonymous"></script>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        * {
+            box-sizing: border-box;
+            user-select: none;
+        }
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100vw;
+            height: 100vh;
+            overflow: hidden;
+            background: #020106;
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            color: #fff;
+        }
+
+        #app-container {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        video {
+            display: none;
+        }
+
+        canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            display: block;
+        }
+
+        /* Ambient floating bats */
+        .bat {
+            position: absolute;
+            font-size: 24px;
+            pointer-events: none;
+            opacity: 0.4;
+            animation: flyAround linear infinite;
+            z-index: 2;
+        }
+
+        @keyframes flyAround {
+            0% { transform: translate(-10vw, 10vh) scale(0.6) rotate(0deg); opacity: 0; }
+            20% { opacity: 0.6; }
+            80% { opacity: 0.6; }
+            100% { transform: translate(110vw, -20vh) scale(1.1) rotate(20deg); opacity: 0; }
+        }
+
+        /* Glassmorphism UI Panels */
+        .glass-panel {
+            background: rgba(15, 6, 25, 0.8);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 120, 0, 0.3);
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.6), 0 0 15px rgba(255, 102, 0, 0.2);
+        }
+
+        .tool-btn {
+            transition: all 0.2s ease;
+        }
+        .tool-btn:hover {
+            transform: translateY(-2px);
+            border-color: rgba(255, 150, 0, 0.8);
+            box-shadow: 0 0 12px rgba(255, 120, 0, 0.5);
+        }
+        .tool-btn.active {
+            border-color: #ffaa00;
+            box-shadow: 0 0 15px currentColor;
+            color: #ffffff;
+        }
+
+        .no-scrollbar::-webkit-scrollbar {
+            display: none;
+        }
+        .no-scrollbar {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="app-container">
+        <!-- Hidden video element for camera -->
+        <video class="input_video" playsinline></video>
+
+        <!-- Main Fullscreen Render Canvas -->
+        <canvas id="output_canvas"></canvas>
+
+        <!-- Top Header & Status -->
+        <div class="absolute top-4 left-6 right-6 flex justify-between items-center z-10 pointer-events-none">
+            <div class="flex items-center gap-3">
+                <div class="glass-panel px-4 py-2 rounded-2xl flex items-center gap-3 pointer-events-auto">
+                    <span class="text-2xl animate-pulse">🎃</span>
+                    <div>
+                        <h1 class="text-lg font-bold text-orange-400 tracking-wide leading-tight">JACK-O'-CARVER</h1>
+                        <p class="text-xs text-purple-300 opacity-80">Pinch Index + Thumb to Draw / Carve</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Computer Vision Overlay Status Badge -->
+            <div id="hud-badge" class="glass-panel px-4 py-2 rounded-2xl text-xs font-mono text-cyan-300 flex items-center gap-4">
+                <div class="flex items-center gap-2">
+                    <span class="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
+                    <span>FPS: <span id="fps-val" class="text-white font-bold">60</span></span>
+                </div>
+                <div class="border-l border-white/20 pl-4">
+                    LATENCY: <span id="latency-val" class="text-amber-300 font-bold">4.2ms</span>
+                </div>
+                <div class="border-l border-white/20 pl-4">
+                    SCORE: <span id="score-val" class="text-emerald-300 font-bold">98.4%</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Floating Left Toolbar: Carving Tools & Color Palette -->
+        <div class="absolute left-6 top-1/2 -translate-y-1/2 z-10 flex flex-col gap-4 pointer-events-auto">
+            <div class="glass-panel p-3 rounded-2xl flex flex-col gap-2.5">
+                <span class="text-[10px] font-bold text-orange-400 uppercase text-center tracking-wider">Carve Glow</span>
+                
+                <button id="color-orange" onclick="setColor('#ffe600', '#ff6600', 'orange')" class="tool-btn active flex items-center gap-3 px-3 py-2 rounded-xl border border-white/10 text-xs font-medium text-left bg-orange-600/40">
+                    <span class="w-3.5 h-3.5 rounded-full bg-orange-400 shadow-[0_0_8px_#ff6600]"></span>
+                    <span>Fiery Orange</span>
+                </button>
+
+                <button id="color-red" onclick="setColor('#ff3333', '#cc0000', 'red')" class="tool-btn flex items-center gap-3 px-3 py-2 rounded-xl border border-white/10 text-xs font-medium text-left hover:bg-red-950/40">
+                    <span class="w-3.5 h-3.5 rounded-full bg-red-500 shadow-[0_0_8px_#ff0000]"></span>
+                    <span>Evil Red</span>
+                </button>
+
+                <button id="color-yellow" onclick="setColor('#ffffff', '#ffea00', 'yellow')" class="tool-btn flex items-center gap-3 px-3 py-2 rounded-xl border border-white/10 text-xs font-medium text-left hover:bg-yellow-950/40">
+                    <span class="w-3.5 h-3.5 rounded-full bg-yellow-300 shadow-[0_0_8px_#ffea00]"></span>
+                    <span>Ghostly Yellow</span>
+                </button>
+
+                <button id="color-purple" onclick="setColor('#e066ff', '#8800cc', 'purple')" class="tool-btn flex items-center gap-3 px-3 py-2 rounded-xl border border-white/10 text-xs font-medium text-left hover:bg-purple-950/40">
+                    <span class="w-3.5 h-3.5 rounded-full bg-purple-400 shadow-[0_0_8px_#aa00ff]"></span>
+                    <span>Fiery Purple</span>
+                </button>
+
+                <button id="tool-dark" onclick="setColor('#120300', 'none', 'dark')" class="tool-btn flex items-center gap-3 px-3 py-2 rounded-xl border border-white/10 text-xs font-medium text-left hover:bg-stone-900/60">
+                    <span class="w-3.5 h-3.5 rounded-full bg-stone-900 border border-stone-600"></span>
+                    <span>Deep Cut</span>
+                </button>
+
+                <button id="tool-eraser" onclick="setEraser()" class="tool-btn flex items-center gap-3 px-3 py-2 rounded-xl border border-white/10 text-xs font-medium text-left hover:bg-cyan-950/40">
+                    <span class="text-base">✨</span>
+                    <span>Restore</span>
+                </button>
+            </div>
+
+            <!-- Line Thickness Control -->
+            <div class="glass-panel p-3 rounded-2xl flex flex-col gap-2 items-center">
+                <span class="text-[10px] font-bold text-orange-400 uppercase tracking-wider">Size</span>
+                <div class="flex flex-col gap-2 my-1">
+                    <button onclick="setThickness(8, this)" class="size-btn w-8 h-8 rounded-full border border-white/20 flex items-center justify-center hover:bg-orange-500/20 text-xs font-bold">S</button>
+                    <button onclick="setThickness(18, this)" class="size-btn w-8 h-8 rounded-full border border-orange-500 bg-orange-500/30 flex items-center justify-center text-xs font-bold">M</button>
+                    <button onclick="setThickness(32, this)" class="size-btn w-8 h-8 rounded-full border border-white/20 flex items-center justify-center hover:bg-orange-500/20 text-xs font-bold">L</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Floating Bottom Toolbar: Canvas Actions -->
+        <div class="absolute bottom-6 left-1/2 -translate-x-1/2 z-10 glass-panel px-6 py-3 rounded-3xl flex items-center gap-4 pointer-events-auto">
+            <button onclick="toggleBoundingBox()" id="btn-bbox" class="px-3.5 py-2 rounded-xl bg-cyan-950/60 border border-cyan-500/40 text-cyan-300 text-xs font-mono hover:bg-cyan-900/60 transition-all flex items-center gap-1.5">
+                <span>🎯</span> B-Box: ON
+            </button>
+            <button onclick="downloadSnapshot()" class="px-3.5 py-2 rounded-xl bg-amber-950/60 border border-amber-500/40 text-amber-300 text-xs font-semibold hover:bg-amber-900/60 transition-all flex items-center gap-1.5">
+                <span>📷</span> Save Photo
+            </button>
+            <button onclick="clearCarvings()" class="px-3.5 py-2 rounded-xl bg-red-950/60 border border-red-500/40 text-red-300 text-xs font-semibold hover:bg-red-900/60 transition-all flex items-center gap-1.5">
+                <span>🗑️</span> Clear Face
+            </button>
+        </div>
+    </div>
+
+    <!-- Generate Ambient Background Flying Bats -->
+    <script>
+        for (let i = 0; i < 15; i++) {
+            const bat = document.createElement('div');
+            bat.className = 'bat';
+            bat.innerText = Math.random() > 0.4 ? '🦇' : '👻';
+            bat.style.left = (Math.random() * 100) + 'vw';
+            bat.style.top = (Math.random() * 80) + 'vh';
+            bat.style.animationDuration = (Math.random() * 8 + 7) + 's';
+            bat.style.animationDelay = (Math.random() * 6) + 's';
+            document.body.appendChild(bat);
+        }
+    </script>
+
+    <script>
+        // DOM Elements
+        const videoElement = document.querySelector('.input_video');
+        const canvasElement = document.getElementById('output_canvas');
+        const canvasCtx = canvasElement.getContext('2d');
+
+        // Offscreen Canvas to hold carved artwork permanently
+        const carveCanvas = document.createElement('canvas');
+        const carveCtx = carveCanvas.getContext('2d');
+
+        // Audio & Tone.js State
+        let synth = null;
+        let isAudioInit = false;
+
+        function initAudio() {
+            if (isAudioInit) return;
+            try {
+                Tone.start();
+                synth = new Tone.PolySynth(Tone.Synth, {
+                    oscillator: { type: "sawtooth" },
+                    envelope: { attack: 0.01, decay: 0.2, sustain: 0.1, release: 0.4 }
+                }).toDestination();
+                synth.volume.value = -12;
+                isAudioInit = true;
+            } catch (e) {
+                console.log("Audio initialization delayed");
+            }
+        }
+
+        function playCarveSound() {
+            if (!isAudioInit || !synth) return;
+            try {
+                const notes = ["C3", "D#3", "F#3", "A3"];
+                const randomNote = notes[Math.floor(Math.random() * notes.length)];
+                synth.triggerAttackRelease(randomNote, "32n");
+            } catch (e) {}
+        }
+
+        function playReleaseSound() {
+            if (!isAudioInit || !synth) return;
+            try {
+                synth.triggerAttackRelease("C5", "16n");
+            } catch (e) {}
+        }
+
+        // App Options & Styling
+        let strokeColor = '#ffe600';
+        let glowColor = '#ff6600';
+        let isEraser = false;
+        let isDarkCut = false;
+        let currentThickness = 18;
+        let showBoundingBox = true;
+
+        // Interactive States
+        let isPinching = false;
+        let lastPoint = null;
+        let particles = [];
+        let flickerAngle = 0;
+        let lastFrameTime = performance.now();
+        let frameCount = 0;
+        let fps = 60;
+
+        // Resize Canvas to fit screen
+        function resizeCanvas() {
+            canvasElement.width = window.innerWidth;
+            canvasElement.height = window.innerHeight;
+            carveCanvas.width = window.innerWidth;
+            carveCanvas.height = window.innerHeight;
+        }
+        window.addEventListener('resize', resizeCanvas);
+
+        // Tool Selection Handlers
+        function setColor(stroke, glow, id) {
+            strokeColor = stroke;
+            glowColor = glow;
+            isEraser = false;
+            isDarkCut = (id === 'dark');
+
+            document.querySelectorAll('.tool-btn').forEach(btn => btn.classList.remove('active'));
+            const target = id === 'dark' ? document.getElementById('tool-dark') : document.getElementById(`color-${id}`);
+            if (target) target.classList.add('active');
+            initAudio();
+        }
+
+        function setEraser() {
+            isEraser = true;
+            isDarkCut = false;
+            document.querySelectorAll('.tool-btn').forEach(btn => btn.classList.remove('active'));
+            document.getElementById('tool-eraser').classList.add('active');
+            initAudio();
+        }
+
+        function setThickness(size, elem) {
+            currentThickness = size;
+            document.querySelectorAll('.size-btn').forEach(btn => {
+                btn.classList.remove('border-orange-500', 'bg-orange-500/30');
+                btn.classList.add('border-white/20');
+            });
+            elem.classList.remove('border-white/20');
+            elem.classList.add('border-orange-500', 'bg-orange-500/30');
+            initAudio();
+        }
+
+        function toggleBoundingBox() {
+            showBoundingBox = !showBoundingBox;
+            const btn = document.getElementById('btn-bbox');
+            btn.innerHTML = showBoundingBox ? '<span>🎯</span> B-Box: ON' : '<span>🎯</span> B-Box: OFF';
+            initAudio();
+        }
+
+        function clearCarvings() {
+            carveCtx.clearRect(0, 0, carveCanvas.width, carveCanvas.height);
+            initAudio();
+        }
+
+        function downloadSnapshot() {
+            const link = document.createElement('a');
+            link.download = 'my-jack-o-lantern.png';
+            link.href = canvasElement.toDataURL('image/png');
+            link.click();
+        }
+
+        // Drawing Logic on Offscreen Canvas
+        function drawCarveSegment(p1, p2) {
+            carveCtx.save();
+            if (isEraser) {
+                carveCtx.globalCompositeOperation = 'destination-out';
+                carveCtx.lineWidth = currentThickness * 1.5;
+                carveCtx.lineCap = 'round';
+                carveCtx.lineJoin = 'round';
+                carveCtx.beginPath();
+                carveCtx.moveTo(p1.x, p1.y);
+                carveCtx.lineTo(p2.x, p2.y);
+                carveCtx.stroke();
+            } else if (isDarkCut) {
+                carveCtx.globalCompositeOperation = 'source-over';
+                carveCtx.strokeStyle = strokeColor;
+                carveCtx.shadowBlur = 0;
+                carveCtx.lineWidth = currentThickness;
+                carveCtx.lineCap = 'round';
+                carveCtx.lineJoin = 'round';
+                carveCtx.beginPath();
+                carveCtx.moveTo(p1.x, p1.y);
+                carveCtx.lineTo(p2.x, p2.y);
+                carveCtx.stroke();
+            } else {
+                carveCtx.globalCompositeOperation = 'source-over';
+                carveCtx.strokeStyle = strokeColor;
+                carveCtx.shadowColor = glowColor;
+                carveCtx.shadowBlur = currentThickness * 1.2;
+                carveCtx.lineWidth = currentThickness;
+                carveCtx.lineCap = 'round';
+                carveCtx.lineJoin = 'round';
+                carveCtx.beginPath();
+                carveCtx.moveTo(p1.x, p1.y);
+                carveCtx.lineTo(p2.x, p2.y);
+                carveCtx.stroke();
+            }
+            carveCtx.restore();
+
+            // Spawn spark particles while carving
+            if (!isEraser) {
+                for (let i = 0; i < 2; i++) {
+                    particles.push({
+                        x: p2.x + (Math.random() - 0.5) * currentThickness,
+                        y: p2.y + (Math.random() - 0.5) * currentThickness,
+                        vx: (Math.random() - 0.5) * 4,
+                        vy: (Math.random() - 0.5) * 4 - 1,
+                        size: Math.random() * 4 + 2,
+                        color: isDarkCut ? '#ff6600' : glowColor,
+                        life: 1.0
+                    });
+                }
+            }
+        }
+
+        // Huge Centered Pumpkin Drawing Function (Stylized Animated Cartoon)
+        function drawHugePumpkin(ctx, w, h) {
+            flickerAngle += 0.05;
+            const flicker = Math.sin(flickerAngle) * 0.12 + Math.cos(flickerAngle * 2.1) * 0.08 + 0.9;
+
+            const cx = w / 2;
+            const cy = h / 2 + 10;
+            // Huge scale relative to viewport
+            const rx = Math.min(w * 0.38, 480);
+            const ry = Math.min(h * 0.36, 360);
+
+            ctx.save();
+
+            // Ground shadow with subtle cartoon rim glow
+            const shadowGrad = ctx.createRadialGradient(cx, cy + ry * 0.92, 10, cx, cy + ry * 0.92, rx * 1.25);
+            shadowGrad.addColorStop(0, 'rgba(10, 2, 20, 0.85)');
+            shadowGrad.addColorStop(0.6, 'rgba(255, 100, 0, 0.2)');
+            shadowGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+            ctx.fillStyle = shadowGrad;
+            ctx.beginPath();
+            ctx.ellipse(cx, cy + ry * 0.92, rx * 1.2, ry * 0.28, 0, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Stylized 3D Gnarled Stem with Vine Tendrils
+            ctx.save();
+            ctx.shadowColor = '#1f570e';
+            ctx.shadowBlur = 20;
+            
+            // Stem Base & Main Body (Curved & Textured)
+            const stemGrad = ctx.createLinearGradient(cx - 40, cy - ry, cx + 60, cy - ry - 130);
+            stemGrad.addColorStop(0, '#1c420b');
+            stemGrad.addColorStop(0.3, '#3a8019');
+            stemGrad.addColorStop(0.7, '#64be2e');
+            stemGrad.addColorStop(1, '#94f253');
+
+            ctx.fillStyle = stemGrad;
+            ctx.strokeStyle = '#0d2105';
+            ctx.lineWidth = 5;
+            ctx.lineJoin = 'round';
+            ctx.beginPath();
+            ctx.moveTo(cx - rx * 0.11, cy - ry + 30);
+            ctx.bezierCurveTo(cx - rx * 0.2, cy - ry - 60, cx - rx * 0.05, cy - ry - 135, cx + rx * 0.18, cy - ry - 110);
+            ctx.bezierCurveTo(cx + rx * 0.08, cy - ry - 90, cx + rx * 0.02, cy - ry - 20, cx + rx * 0.11, cy - ry + 30);
+            ctx.closePath();
+            ctx.fill();
+            ctx.stroke();
+
+            // Stem Ribs & Ridges (3D depth detail lines)
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.35)';
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.moveTo(cx - 12, cy - ry + 15);
+            ctx.bezierCurveTo(cx - 25, cy - ry - 45, cx + 5, cy - ry - 100, cx + 30, cy - ry - 95);
+            ctx.stroke();
+
+            // Curly Vine Tendril
+            ctx.strokeStyle = '#52b022';
+            ctx.lineWidth = 4;
+            ctx.beginPath();
+            ctx.moveTo(cx + rx * 0.14, cy - ry - 100);
+            ctx.bezierCurveTo(cx + rx * 0.25, cy - ry - 130, cx + rx * 0.3, cy - ry - 80, cx + rx * 0.22, cy - ry - 60);
+            ctx.bezierCurveTo(cx + rx * 0.15, cy - ry - 40, cx + rx * 0.28, cy - ry - 30, cx + rx * 0.35, cy - ry - 50);
+            ctx.stroke();
+            ctx.restore();
+
+            // Outer Pumpkin Vibrant Multi-Layer Glow
+            ctx.shadowColor = '#ff5500';
+            ctx.shadowBlur = 60 * flicker;
+
+            // 3D Pumpkin Rib Specifications with Volumetric Gradients
+            const ribs = [
+                { offset: -rx * 0.68, scaleX: 0.5, colorTop: '#e63b00', colorMid: '#991f00', colorBot: '#400a00' },
+                { offset: rx * 0.68, scaleX: 0.5, colorTop: '#e63b00', colorMid: '#991f00', colorBot: '#400a00' },
+                { offset: -rx * 0.44, scaleX: 0.7, colorTop: '#ff5500', colorMid: '#bf2b00', colorBot: '#520d00' },
+                { offset: rx * 0.44, scaleX: 0.7, colorTop: '#ff5500', colorMid: '#bf2b00', colorBot: '#520d00' },
+                { offset: -rx * 0.22, scaleX: 0.88, colorTop: '#ff7700', colorMid: '#d93800', colorBot: '#661100' },
+                { offset: rx * 0.22, scaleX: 0.88, colorTop: '#ff7700', colorMid: '#d93800', colorBot: '#661100' },
+                { offset: 0, scaleX: 1.04, colorTop: '#ff9900', colorMid: '#ff4500', colorBot: '#801400' }
+            ];
+
+            // Render 3D Rib Segments with Top & Side Lighting Highlights
+            ribs.forEach(rib => {
+                ctx.save();
+                const grad = ctx.createRadialGradient(
+                    cx + rib.offset, cy - ry * 0.3, rx * 0.1,
+                    cx + rib.offset, cy, ry * 1.1
+                );
+                grad.addColorStop(0, rib.colorTop);
+                grad.addColorStop(0.65, rib.colorMid);
+                grad.addColorStop(1, rib.colorBot);
+
+                ctx.fillStyle = grad;
+                ctx.strokeStyle = '#1f0300';
+                ctx.lineWidth = 6;
+                ctx.beginPath();
+                ctx.ellipse(cx + rib.offset, cy, rx * rib.scaleX, ry, 0, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.stroke();
+
+                // Rib Grooves / Ridge Highlights
+                ctx.strokeStyle = 'rgba(255, 180, 80, 0.18)';
+                ctx.lineWidth = 4;
+                ctx.beginPath();
+                ctx.ellipse(cx + rib.offset, cy, rx * rib.scaleX * 0.85, ry * 0.92, 0, 0, Math.PI * 2);
+                ctx.stroke();
+
+                ctx.restore();
+            });
+
+            // Glossy Specular Highlights on Top Ridges
+            ctx.save();
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.38)';
+            ctx.beginPath();
+            ctx.ellipse(cx - rx * 0.32, cy - ry * 0.48, rx * 0.2, ry * 0.26, -Math.PI / 6, 0, Math.PI * 2);
+            ctx.fill();
+
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.55)';
+            ctx.beginPath();
+            ctx.ellipse(cx - rx * 0.12, cy - ry * 0.58, rx * 0.15, ry * 0.12, -Math.PI / 8, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
+
+            ctx.restore();
+        }
+
+        // Render particles (sparks from carving)
+        function updateAndDrawParticles(ctx) {
+            for (let i = particles.length - 1; i >= 0; i--) {
+                const p = particles[i];
+                p.x += p.vx;
+                p.y += p.vy;
+                p.life -= 0.03;
+                p.size *= 0.96;
+
+                if (p.life <= 0) {
+                    particles.splice(i, 1);
+                    continue;
+                }
+
+                ctx.save();
+                ctx.globalAlpha = p.life;
+                ctx.fillStyle = p.color;
+                ctx.shadowColor = p.color;
+                ctx.shadowBlur = 8;
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.restore();
+            }
+        }
+
+        // MediaPipe Results Frame Handler
+        function onResults(results) {
+            // FPS Calculation
+            const now = performance.now();
+            frameCount++;
+            if (now - lastFrameTime >= 1000) {
+                fps = Math.round((frameCount * 1000) / (now - lastFrameTime));
+                document.getElementById('fps-val').innerText = fps;
+                frameCount = 0;
+                lastFrameTime = now;
+            }
+
+            canvasCtx.save();
+            canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+
+            // 1. Draw Blurred & Darkened Webcam Feed Background (Horizontally Mirrored)
+            canvasCtx.save();
+            canvasCtx.scale(-1, 1);
+            canvasCtx.translate(-canvasElement.width, 0);
+            canvasCtx.filter = 'blur(22px) brightness(0.25) contrast(1.2)';
+            canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
+            canvasCtx.restore();
+
+            // 2. Render Huge Centered Pumpkin Base
+            drawHugePumpkin(canvasCtx, canvasElement.width, canvasElement.height);
+
+            // 3. Composite Carved Art Layer onto Pumpkin
+            canvasCtx.drawImage(carveCanvas, 0, 0);
+
+            // 4. Update Particle Effects
+            updateAndDrawParticles(canvasCtx);
+
+            // 5. Track Pinch Gesture & Hand Landmark Computer Vision Overlay
+            if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                const landmarks = results.multiHandLandmarks[0];
+
+                // Mirrored coordinates calculation (matching webcam horizontal mirror)
+                const thumbX = (1 - landmarks[4].x) * canvasElement.width;
+                const thumbY = landmarks[4].y * canvasElement.height;
+                const indexX = (1 - landmarks[8].x) * canvasElement.width;
+                const indexY = landmarks[8].y * canvasElement.height;
+
+                // Pinch distance check
+                const pinchDist = Math.hypot(indexX - thumbX, indexY - thumbY);
+                const currentPoint = { x: indexX, y: indexY };
+
+                if (pinchDist < 45) {
+                    if (!isPinching) {
+                        isPinching = true;
+                        initAudio();
+                    } else if (lastPoint) {
+                        drawCarveSegment(lastPoint, currentPoint);
+                        playCarveSound();
+                    }
+                    lastPoint = currentPoint;
+                } else {
+                    if (isPinching) {
+                        playReleaseSound();
+                    }
+                    isPinching = false;
+                    lastPoint = null;
+                }
+
+                // Render Detection Bounding Box & Landmarks Overlay
+                if (showBoundingBox) {
+                    let minX = canvasElement.width, minY = canvasElement.height, maxX = 0, maxY = 0;
+                    landmarks.forEach(lm => {
+                        const x = (1 - lm.x) * canvasElement.width;
+                        const y = lm.y * canvasElement.height;
+                        if (x < minX) minX = x;
+                        if (x > maxX) maxX = x;
+                        if (y < minY) minY = y;
+                        if (y > maxY) maxY = y;
+                    });
+
+                    // Add padding
+                    minX = Math.max(0, minX - 20);
+                    minY = Math.max(0, minY - 20);
+                    maxX = Math.min(canvasElement.width, maxX + 20);
+                    maxY = Math.min(canvasElement.height, maxY + 20);
+
+                    // Draw Cyber Bounding Box
+                    canvasCtx.strokeStyle = isPinching ? '#ff6600' : '#00f0ff';
+                    canvasCtx.lineWidth = 2;
+                    canvasCtx.setLineDash([8, 6]);
+                    canvasCtx.strokeRect(minX, minY, maxX - minX, maxY - minY);
+                    canvasCtx.setLineDash([]);
+
+                    // Bounding Box Label Badge
+                    canvasCtx.fillStyle = isPinching ? 'rgba(255, 102, 0, 0.85)' : 'rgba(0, 240, 255, 0.85)';
+                    canvasCtx.fillRect(minX, minY - 24, 130, 24);
+                    canvasCtx.fillStyle = '#000';
+                    canvasCtx.font = 'bold 11px monospace';
+                    canvasCtx.fillText(isPinching ? 'CARVING [PINCH]' : 'HAND DETECTED', minX + 8, minY - 8);
+                }
+
+                // Render Cursor Pinch Indicator
+                canvasCtx.save();
+                canvasCtx.shadowColor = isPinching ? '#ffaa00' : '#00ffff';
+                canvasCtx.shadowBlur = 15;
+                canvasCtx.fillStyle = isPinching ? strokeColor : 'rgba(0, 255, 255, 0.7)';
+                canvasCtx.beginPath();
+                canvasCtx.arc(indexX, indexY, isPinching ? currentThickness / 2 : 8, 0, Math.PI * 2);
+                canvasCtx.fill();
+                canvasCtx.restore();
+            } else {
+                isPinching = false;
+                lastPoint = null;
+            }
+
+            canvasCtx.restore();
+        }
+
+        // Initialize MediaPipe Hands
+        const hands = new Hands({
+            locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+        });
+        hands.setOptions({
+            maxNumHands: 1,
+            modelComplexity: 1,
+            minDetectionConfidence: 0.7,
+            minTrackingConfidence: 0.7
+        });
+        hands.onResults(onResults);
+
+        // Start Camera Stream
+        const camera = new Camera(videoElement, {
+            onFrame: async () => {
+                await hands.send({ image: videoElement });
+            },
+            width: 1280,
+            height: 720
+        });
+        camera.start();
+
+        // Mouse Fallback Drawing Support
+        let isMouseDown = false;
+        canvasElement.addEventListener('mousedown', (e) => {
+            isMouseDown = true;
+            initAudio();
+            lastPoint = { x: e.clientX, y: e.clientY };
+        });
+        canvasElement.addEventListener('mousemove', (e) => {
+            if (isMouseDown && lastPoint) {
+                const currentPoint = { x: e.clientX, y: e.clientY };
+                drawCarveSegment(lastPoint, currentPoint);
+                playCarveSound();
+                lastPoint = currentPoint;
+            }
+        });
+        window.addEventListener('mouseup', () => {
+            if (isMouseDown) {
+                playReleaseSound();
+            }
+            isMouseDown = false;
+            lastPoint = null;
+        });
+
+        // Initialize audio context on first user click
+        window.addEventListener('click', () => {
+            initAudio();
+        }, { once: true });
+
+        // Initial setup
+        resizeCanvas();
+    </script>
+</body>
+</html>
