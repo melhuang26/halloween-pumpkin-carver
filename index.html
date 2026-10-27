@@ -154,11 +154,6 @@
                     <span>Ghostly Yellow</span>
                 </button>
 
-                <button id="color-purple" onclick="setColor('#e066ff', '#8800cc', 'purple')" class="tool-btn flex items-center gap-3 px-3 py-2 rounded-xl border border-white/10 text-xs font-medium text-left hover:bg-purple-950/40">
-                    <span class="w-3.5 h-3.5 rounded-full bg-purple-400 shadow-[0_0_8px_#aa00ff]"></span>
-                    <span>Fiery Purple</span>
-                </button>
-
                 <button id="tool-dark" onclick="setColor('#120300', 'none', 'dark')" class="tool-btn flex items-center gap-3 px-3 py-2 rounded-xl border border-white/10 text-xs font-medium text-left hover:bg-stone-900/60">
                     <span class="w-3.5 h-3.5 rounded-full bg-stone-900 border border-stone-600"></span>
                     <span>Deep Cut</span>
@@ -325,10 +320,26 @@
         }
 
         function downloadSnapshot() {
+            // Temporarily store state & turn off bounding box for clean snapshot
+            const originalBBoxState = showBoundingBox;
+            showBoundingBox = false;
+
+            // Re-render frame immediately without bounding box
+            if (window.lastResults) {
+                onResults(window.lastResults);
+            }
+
+            // Capture cleaned frame canvas snapshot
             const link = document.createElement('a');
             link.download = 'my-jack-o-lantern.png';
             link.href = canvasElement.toDataURL('image/png');
             link.click();
+
+            // Restore original bounding box setting
+            showBoundingBox = originalBBoxState;
+            if (window.lastResults) {
+                onResults(window.lastResults);
+            }
         }
 
         // Drawing Logic on Offscreen Canvas
@@ -456,13 +467,13 @@
 
             // 3D Pumpkin Rib Specifications with Volumetric Gradients
             const ribs = [
-                { offset: -rx * 0.68, scaleX: 0.5, colorTop: '#e63b00', colorMid: '#991f00', colorBot: '#400a00' },
-                { offset: rx * 0.68, scaleX: 0.5, colorTop: '#e63b00', colorMid: '#991f00', colorBot: '#400a00' },
-                { offset: -rx * 0.44, scaleX: 0.7, colorTop: '#ff5500', colorMid: '#bf2b00', colorBot: '#520d00' },
-                { offset: rx * 0.44, scaleX: 0.7, colorTop: '#ff5500', colorMid: '#bf2b00', colorBot: '#520d00' },
-                { offset: -rx * 0.22, scaleX: 0.88, colorTop: '#ff7700', colorMid: '#d93800', colorBot: '#661100' },
-                { offset: rx * 0.22, scaleX: 0.88, colorTop: '#ff7700', colorMid: '#d93800', colorBot: '#661100' },
-                { offset: 0, scaleX: 1.04, colorTop: '#ff9900', colorMid: '#ff4500', colorBot: '#801400' }
+                { offset: -rx * 0.68, scaleX: 0.5, colorTop: '#ff661a', colorMid: '#FF4D00', colorBot: '#400a00' },
+                { offset: rx * 0.68, scaleX: 0.5, colorTop: '#ff661a', colorMid: '#FF4D00', colorBot: '#400a00' },
+                { offset: -rx * 0.44, scaleX: 0.7, colorTop: '#ff661a', colorMid: '#FF4D00', colorBot: '#520d00' },
+                { offset: rx * 0.44, scaleX: 0.7, colorTop: '#ff661a', colorMid: '#FF4D00', colorBot: '#520d00' },
+                { offset: -rx * 0.22, scaleX: 0.88, colorTop: '#ff771a', colorMid: '#FF4D00', colorBot: '#661100' },
+                { offset: rx * 0.22, scaleX: 0.88, colorTop: '#ff771a', colorMid: '#FF4D00', colorBot: '#661100' },
+                { offset: 0, scaleX: 1.04, colorTop: '#ff881a', colorMid: '#FF4D00', colorBot: '#801400' }
             ];
 
             // Render 3D Rib Segments with Top & Side Lighting Highlights
@@ -493,19 +504,6 @@
 
                 ctx.restore();
             });
-
-            // Glossy Specular Highlights on Top Ridges
-            ctx.save();
-            ctx.fillStyle = 'rgba(255, 255, 255, 0.38)';
-            ctx.beginPath();
-            ctx.ellipse(cx - rx * 0.32, cy - ry * 0.48, rx * 0.2, ry * 0.26, -Math.PI / 6, 0, Math.PI * 2);
-            ctx.fill();
-
-            ctx.fillStyle = 'rgba(255, 255, 255, 0.55)';
-            ctx.beginPath();
-            ctx.ellipse(cx - rx * 0.12, cy - ry * 0.58, rx * 0.15, ry * 0.12, -Math.PI / 8, 0, Math.PI * 2);
-            ctx.fill();
-            ctx.restore();
 
             ctx.restore();
         }
@@ -538,6 +536,9 @@
 
         // MediaPipe Results Frame Handler
         function onResults(results) {
+            // Store results globally for snapshot re-rendering
+            window.lastResults = results;
+
             // FPS Calculation
             const now = performance.now();
             frameCount++;
@@ -669,7 +670,30 @@
             width: 1280,
             height: 720
         });
-        camera.start();
+        camera.start().catch((err) => {
+            console.log("Camera access delayed or declined:", err);
+        });
+
+        // Fallback Instant Render Loop (Renders Pumpkin immediately before camera frame arrives)
+        function renderLoop() {
+            if (!videoElement.videoWidth || videoElement.paused) {
+                // Render dark background + pumpkin + carvings even when camera isn't ready
+                canvasCtx.save();
+                canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+
+                // Dark ambient background
+                canvasCtx.fillStyle = '#06020a';
+                canvasCtx.fillRect(0, 0, canvasElement.width, canvasElement.height);
+
+                // Draw Pumpkin & Carved Artwork immediately
+                drawHugePumpkin(canvasCtx, canvasElement.width, canvasElement.height);
+                canvasCtx.drawImage(carveCanvas, 0, 0);
+                updateAndDrawParticles(canvasCtx);
+
+                canvasCtx.restore();
+            }
+            requestAnimationFrame(renderLoop);
+        }
 
         // Mouse Fallback Drawing Support
         let isMouseDown = false;
@@ -701,6 +725,7 @@
 
         // Initial setup
         resizeCanvas();
+        renderLoop();
     </script>
 </body>
 </html>
